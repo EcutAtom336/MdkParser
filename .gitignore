@@ -1,0 +1,7 @@
+.vscode
+config/config.yaml
+TODO
+mdk_parser.code-workspace
+build
+MDK_parser.exe.spec
+dist/
