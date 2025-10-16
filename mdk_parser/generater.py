@@ -56,7 +56,7 @@ def generate_compiler_commands(
         compile_commands.append(command)
 
     with open(output_path / "compile_commands.json", "w") as f:
-        f.write(json.dumps(compile_commands))
+        f.write(json.dumps(compile_commands, indent=4, ensure_ascii=False))
 
 
 argParser = argparse.ArgumentParser(
