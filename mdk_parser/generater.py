@@ -42,6 +42,7 @@ def get_compile_args(raw_file_block: str) -> list[str]:
 def generate_compiler_commands(
     project_root: Path,
     compiler_exe: Path,
+    compiler_include_dir: Path,
     sources: list[Path],
     compile_args: dict[Path, list[str]],
     output_path: Path,
@@ -51,7 +52,7 @@ def generate_compiler_commands(
         command: dict[str, str] = {
             "directory": str(project_root),
             "file": str(source),
-            "command": f"{compiler_exe} {' '.join(compile_args[source])} {source}",
+            "command": f"{compiler_exe} {' '.join(compile_args[source])} -I{compiler_include_dir} {source}",
         }
         compile_commands.append(command)
 
@@ -76,6 +77,12 @@ argParser.add_argument(
 argParser.add_argument(
     "--compiler-exe", help="Compiler exe file", type=Path, required=True
 )
+argParser.add_argument(
+    "--compiler-include-dir",
+    help="Compiler include directory ",
+    type=Path,
+    required=True,
+)
 
 args = argParser.parse_args()
 
@@ -83,6 +90,7 @@ project_root: Path = args.root
 dep_file: Path = args.dep_file
 compile_commands_out_path: Path = args.compile_commands_out_path
 compiler_exe: Path = args.compiler_exe
+compiler_include_dir = args.compiler_include_dir
 
 assert dep_file.exists(), ".dep file not found."
 
@@ -95,5 +103,10 @@ for raw_file_block in raw_file_blocks:
     sources.append(source)
     compile_args[source] = get_compile_args(raw_file_block)
 generate_compiler_commands(
-    project_root, compiler_exe, sources, compile_args, compile_commands_out_path
+    project_root,
+    compiler_exe,
+    compiler_include_dir,
+    sources,
+    compile_args,
+    compile_commands_out_path,
 )
