@@ -74,7 +74,7 @@ argParser.add_argument(
     required=True,
 )
 argParser.add_argument(
-    "--compiler-exe", help="Compile exe file", type=Path, required=True
+    "--compiler-exe", help="Compiler exe file", type=Path, required=True
 )
 
 args = argParser.parse_args()
