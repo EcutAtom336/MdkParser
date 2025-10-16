@@ -1,48 +1,60 @@
 import argparse
 import re
 import json
+import shlex
 
 
-def get_source_files(dep_file: str) -> set[str]:
+def get_raw_file_blocks(dep_file: str) -> list[str]:
     with open(dep_file) as f:
-        dep = f.read()
-        source_files = re.findall(r"F \((.*?\.c)\)", dep)
-    if source_files.count == 0:
-        exit("Number of source file is 0.")
-    return set(source_files)
+        raw_file_blocks = re.findall(
+            r"^F.*(?:\n(?!F).*)*", f.read(), flags=re.MULTILINE
+        )
+        assert len(raw_file_blocks) != 0, "File block not found."
+        return raw_file_blocks
 
 
-def get_compile_arg(dep_file: str) -> str:
-    with open(dep_file) as f:
-        dep = f.read()
-        m = re.search(r"\((-[\S\s\n]+?)\)", dep)
-    if m is None:
-        exit("Compile arg not found.")
-    compile_arg = m.group(1)
-    return re.sub(r"[\r\n]", " ", compile_arg)
+def get_source_file(raw_file_block: str) -> str:
+    m = re.search(r"F \(([\s\S]+?)\)", raw_file_block)
+    assert m is not None, "No match source file string."
+    return m.group(1)
+
+
+def get_compile_args(raw_file_block: str) -> list[str]:
+    m = re.search(r"\((-[\S\s\n]+?)\)", raw_file_block)
+    assert m is not None
+    compile_args_str: str = m.group(1)
+    tight_compile_args: list[str] = list()
+    next_is_include_path: bool = False
+    for compile_arg in shlex.split(compile_args_str):
+        if next_is_include_path:
+            next_is_include_path = False
+            tight_compile_args.append("-I" + compile_arg)
+            pass
+        elif compile_arg == "-I":
+            next_is_include_path = True
+        else:
+            tight_compile_args.append(compile_arg)
+
+    return tight_compile_args
 
 
 def generate_compiler_commands(
-    mdk_path: str,
-    project_dir: str,
-    source_files: set[str],
-    compile_arg: str,
+    project_root: str,
+    compiler_exe: str,
+    sources: list[str],
+    compile_args: dict[str, list[str]],
+    output_path: str,
 ):
-    compiler = mdk_path + "/ARM/ARMCLANG/bin/armclang.exe"
-    compiler_include_dir = mdk_path + "/ARM/ARMCLANG/include"
-
-    compile_arg = compile_arg + " -I" + compiler_include_dir
-
     compile_commands: list[dict[str, str]] = list()
-    for source_file in source_files:
+    for source in sources:
         command: dict[str, str] = {
-            "directory": project_dir,
-            "file": source_file,
-            "command": compiler + " " + compile_arg + " " + source_file,
+            "directory": project_root,
+            "file": source,
+            "command": f"{compiler_exe} {' '.join(compile_args[source])} {source}",
         }
         compile_commands.append(command)
 
-    with open(project_dir + "/compile_commands.json", "w") as f:
+    with open(output_path + "/compile_commands.json", "w") as f:
         f.write(json.dumps(compile_commands))
 
 
@@ -50,28 +62,33 @@ argParser = argparse.ArgumentParser(
     description="Generate compile_commands.json form MDK project"
 )
 
+argParser.add_argument("--root", help="Project root path", type=str, required=True)
+argParser.add_argument("--dep-file", help="Keil MDK .dep file", type=str, required=True)
 argParser.add_argument(
-    "-p", "--project-path", help="MDK project path", type=str, required=True
+    "--compile-commands-out-path",
+    help="compile_commands.json output path",
+    type=str,
+    required=True,
 )
 argParser.add_argument(
-    "-n", "--project-name", help="MDK project name", type=str, required=True
+    "--compiler-exe", help="Compile exe file", type=str, required=True
 )
-argParser.add_argument(
-    "-t", "--target-name", help="target name", type=str, required=True
-)
-argParser.add_argument("-m", "--mdk-path", help="mdk path", type=str, required=True)
 
 args = argParser.parse_args()
 
-project_path: str = args.project_path
-project_name: str = args.project_name
-target_name: str = args.target_name
-mdk_path: str = args.mdk_path
+project_root: str = args.root
+dep_file: str = args.dep_file
+compile_commands_out_path = args.compile_commands_out_path
+compiler_exe = args.compiler_exe
 
-dep_file: str = project_path + "/Objects/" + project_name + "_" + target_name + ".dep"
+raw_file_blocks = get_raw_file_blocks(dep_file)
 
-compile_arg: str = get_compile_arg(dep_file)
-
-source_files: set[str] = get_source_files(dep_file)
-
-generate_compiler_commands(mdk_path, project_path, source_files, compile_arg)
+sources: list[str] = list()
+compile_args: dict[str, list[str]] = dict()
+for raw_file_block in raw_file_blocks:
+    source = get_source_file(raw_file_block)
+    sources.append(source)
+    compile_args[source] = get_compile_args(raw_file_block)
+generate_compiler_commands(
+    project_root, compiler_exe, sources, compile_args, compile_commands_out_path
+)
