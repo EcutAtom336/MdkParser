@@ -11,19 +11,22 @@ def get_raw_file_blocks(dep_file: Path) -> list[str]:
         raw_file_blocks = re.findall(
             r"^F.*(?:\n(?!F).*)*", f.read(), flags=re.MULTILINE
         )
-    assert len(raw_file_blocks) != 0, "File block not found."
+    if len(raw_file_blocks) == 0:
+        raise ValueError(f"No file blocks found in {dep_file}")
     return raw_file_blocks
 
 
 def get_source_file(raw_file_block: str) -> Path:
     m = re.search(r"F \(([\s\S]+?)\)", raw_file_block)
-    assert m is not None, "No match source file string."
+    if m is None:
+        raise ValueError("No match source file string.")
     return Path(m.group(1))
 
 
 def get_compile_args(raw_file_block: str) -> list[str]:
     m = re.search(r"\((-[\S\s\n]+?)\)", raw_file_block)
-    assert m is not None
+    if m is None:
+        raise ValueError("No match compile arg string.")
     compile_args_str: str = m.group(1)
     tight_compile_args: list[str] = list()
     next_is_include_path: bool = False
@@ -97,12 +100,13 @@ if project_root is None:
     print("Project root is not specified, and the cwd will be used.")
 
 if dep_file is None:
-    print(f".dep file is not specified, will search .dep file in <project root>.")
+    print(f".dep file is not specified, will search .dep file in {project_root}.")
     dep_files: list[Path] = list(Path(project_root).rglob("*.dep"))
-    assert len(dep_files) != 0, "No .dep file was found in <project root>."
+    if len(dep_files) == 0:
+        raise FileNotFoundError(f"No .dep file was found in {project_root}.")
     if len(dep_files) > 1:
         print(
-            "Multiple .dep files found in <project root>, you should use --dep-file to specifiy a .dep file."
+            f"Multiple .dep files found in {project_root}, you should use --dep-file to specifiy a .dep file."
         )
     dep_file = dep_files[0]
     print(f".dep file {dep_file} will be used.")
@@ -116,8 +120,10 @@ if not compile_commands_out_path.is_absolute():
         f"compile_commands.json output path is relative, automatic completion as: {compile_commands_out_path}."
     )
 
-assert project_root.exists(), "Project root path no exist."
-assert dep_file.exists(), ".dep file not found."
+if not project_root.exists():
+    raise FileNotFoundError(f"Project root {project_root} no exist.")
+if not dep_file.exists():
+    raise FileNotFoundError(f".dep file {dep_file} not found.")
 
 raw_file_blocks = get_raw_file_blocks(dep_file)
 
