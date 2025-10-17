@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import json
 import shlex
@@ -64,10 +65,8 @@ argParser = argparse.ArgumentParser(
     description="Generate compile_commands.json form MDK project"
 )
 
-argParser.add_argument("--root", help="Project root path", type=Path, required=True)
-argParser.add_argument(
-    "--dep-file", help="Keil MDK .dep file", type=Path, required=True
-)
+argParser.add_argument("--root", help="Project root path", type=Path)
+argParser.add_argument("--dep-file", help="Keil MDK .dep file", type=Path)
 argParser.add_argument(
     "--compile-commands-out-path",
     help="compile_commands.json output path",
@@ -86,12 +85,38 @@ argParser.add_argument(
 
 args = argParser.parse_args()
 
-project_root: Path = args.root
-dep_file: Path = args.dep_file
+project_root: Path | None = args.root
+dep_file: Path | None = args.dep_file
 compile_commands_out_path: Path = args.compile_commands_out_path
 compiler_exe: Path = args.compiler_exe
 compiler_include_dir = args.compiler_include_dir
 
+# Check param
+if project_root is None:
+    project_root = Path(os.getcwd())
+    print("Project root is not specified, and the cwd will be used.")
+
+if dep_file is None:
+    print(f".dep file is not specified, will search .dep file in <project root>.")
+    dep_files: list[Path] = list(Path(project_root).rglob("*.dep"))
+    assert len(dep_files) != 0, "No .dep file was found in <project root>."
+    if len(dep_files) > 1:
+        print(
+            "Multiple .dep files found in <project root>, you should use --dep-file to specifiy a .dep file."
+        )
+    dep_file = dep_files[0]
+    print(f".dep file {dep_file} will be used.")
+elif not dep_file.is_absolute():
+    dep_file = (project_root / dep_file).resolve()
+    print(f".dep file path is relative, automatic completion as: {dep_file}.")
+
+if not compile_commands_out_path.is_absolute():
+    compile_commands_out_path = (project_root / compile_commands_out_path).resolve()
+    print(
+        f"compile_commands.json output path is relative, automatic completion as: {compile_commands_out_path}."
+    )
+
+assert project_root.exists(), "Project root path no exist."
 assert dep_file.exists(), ".dep file not found."
 
 raw_file_blocks = get_raw_file_blocks(dep_file)
