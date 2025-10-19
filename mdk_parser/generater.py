@@ -10,7 +10,7 @@ import sys
 from datetime import timedelta
 
 
-def get_raw_file_blocks(dep_file: Path) -> list[str]:
+def _get_raw_file_blocks_from_dep_file(dep_file: Path) -> list[str]:
     with open(dep_file) as f:
         raw_file_blocks = re.findall(
             r"^F.*(?:\n(?!F).*)*", f.read(), flags=re.MULTILINE
@@ -20,14 +20,14 @@ def get_raw_file_blocks(dep_file: Path) -> list[str]:
     return raw_file_blocks
 
 
-def get_source_file(raw_file_block: str) -> Path:
+def _parse_source_file_from_raw_file_black(raw_file_block: str) -> Path:
     m = re.search(r"F \(([\s\S]+?)\)", raw_file_block)
     if m is None:
         raise ValueError("No match source file string.")
     return Path(m.group(1))
 
 
-def get_compile_args(raw_file_block: str) -> list[str]:
+def _parse_compile_args_from_raw_file_black(raw_file_block: str) -> list[str]:
     m = re.search(r"\((-[\S\s\n]+?)\)", raw_file_block)
     if m is None:
         raise ValueError("No match compile arg string.")
@@ -47,7 +47,7 @@ def get_compile_args(raw_file_block: str) -> list[str]:
     return tight_compile_args
 
 
-def generate_compiler_commands(
+def _generate_compiler_commands(
     project_root: Path,
     compiler_exe: Path,
     compiler_include_dir: Path,
@@ -73,21 +73,21 @@ argParser = argparse.ArgumentParser(
 )
 
 
-def run_once(
+def _run_once(
     dep_file: Path,
     project_root: Path,
     compiler_exe: Path,
     compiler_include_dir: Path,
     compile_commands_out_path: Path,
 ):
-    raw_file_blocks = get_raw_file_blocks(dep_file)
+    raw_file_blocks = _get_raw_file_blocks_from_dep_file(dep_file)
     sources: list[Path] = list()
     compile_args: dict[Path, list[str]] = dict()
     for raw_file_block in raw_file_blocks:
-        source = get_source_file(raw_file_block)
+        source = _parse_source_file_from_raw_file_black(raw_file_block)
         sources.append(source)
-        compile_args[source] = get_compile_args(raw_file_block)
-    generate_compiler_commands(
+        compile_args[source] = _parse_compile_args_from_raw_file_black(raw_file_block)
+    _generate_compiler_commands(
         project_root,
         compiler_exe,
         compiler_include_dir,
@@ -97,7 +97,7 @@ def run_once(
     )
 
 
-def main():
+def _main():
     argParser.add_argument("--root", help="Project root path", type=Path)
     argParser.add_argument("--dep-file", help="Keil MDK .dep file", type=Path)
     argParser.add_argument(
@@ -163,7 +163,7 @@ def main():
 
     last_dep_file_modify_time = dep_file.stat().st_mtime
     last_generate_compile_commands_time = time.time()
-    run_once(
+    _run_once(
         dep_file,
         project_root,
         compiler_exe,
@@ -178,7 +178,7 @@ def main():
                 if latest_dep_file_modify_time != last_dep_file_modify_time:
                     last_dep_file_modify_time = latest_dep_file_modify_time
                     last_generate_compile_commands_time = time.time()
-                    run_once(
+                    _run_once(
                         dep_file,
                         project_root,
                         compiler_exe,
@@ -203,4 +203,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    _main()
