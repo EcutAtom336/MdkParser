@@ -6,6 +6,9 @@ import shlex
 from pathlib import Path
 import time
 import shutil
+from threading import Timer
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler, FileSystemEvent
 import sys
 from datetime import timedelta
 
@@ -47,15 +50,32 @@ def _parse_compile_args_from_raw_file_black(raw_file_block: str) -> list[str]:
     return tight_compile_args
 
 
-def _generate_compiler_commands(
+def _parse_raw_file_blocks(
+    raw_file_blocks: list[str],
+) -> tuple[list[Path], dict[Path, list[str]]]:
+
+    sources: list[Path] = list()
+    compile_args: dict[Path, list[str]] = dict()
+    for raw_file_block in raw_file_blocks:
+        source = _parse_source_file_from_raw_file_black(raw_file_block)
+        sources.append(source)
+        compile_args[source] = _parse_compile_args_from_raw_file_black(raw_file_block)
+    return (sources, compile_args)
+
+
+def _parse_dep_file(dep_file: Path) -> tuple[list[Path], dict[Path, list[str]]]:
+    return _parse_raw_file_blocks(_get_raw_file_blocks_from_dep_file(dep_file))
+
+
+def _generate_compiler_commands_from_dep_file(
     project_root: Path,
     compiler_exe: Path,
     compiler_include_dir: Path,
-    sources: list[Path],
-    compile_args: dict[Path, list[str]],
+    dep_file: Path,
     output_path: Path,
 ):
     compile_commands: list[dict[str, str]] = list()
+    sources, compile_args = _parse_dep_file(dep_file)
     for source in sources:
         command: dict[str, str] = {
             "directory": str(project_root),
@@ -73,28 +93,58 @@ argParser = argparse.ArgumentParser(
 )
 
 
-def _run_once(
-    dep_file: Path,
-    project_root: Path,
-    compiler_exe: Path,
-    compiler_include_dir: Path,
-    compile_commands_out_path: Path,
-):
-    raw_file_blocks = _get_raw_file_blocks_from_dep_file(dep_file)
-    sources: list[Path] = list()
-    compile_args: dict[Path, list[str]] = dict()
-    for raw_file_block in raw_file_blocks:
-        source = _parse_source_file_from_raw_file_black(raw_file_block)
-        sources.append(source)
-        compile_args[source] = _parse_compile_args_from_raw_file_black(raw_file_block)
-    _generate_compiler_commands(
-        project_root,
-        compiler_exe,
-        compiler_include_dir,
-        sources,
-        compile_args,
-        compile_commands_out_path,
-    )
+class DepFileMonitor(FileSystemEventHandler):
+    _project_root: Path
+    _compiler_exe: Path
+    _compiler_include_dir: Path
+    _dep_file: Path
+    _output_path: Path
+
+    _timer: Timer | None
+    generate_compile_commands_count: int
+    last_generate_compile_commands_time: float
+
+    def __init__(
+        self,
+        project_root: Path,
+        compiler_exe: Path,
+        compiler_include_dir: Path,
+        dep_file: Path,
+        output_path: Path,
+    ) -> None:
+        super().__init__()
+
+        self._project_root = project_root
+        self._compiler_exe = compiler_exe
+        self._compiler_include_dir = compiler_include_dir
+        self._dep_file = dep_file
+        self._output_path = output_path
+
+        self._timer = None
+        self._last_dep_file_sha256 = str()
+        self.generate_compile_commands_count = 0
+        self.last_generate_compile_commands_time = 0
+
+        self._on_dep_file_changed()
+
+    def on_modified(self, event: FileSystemEvent):
+        if event.src_path != str(self._dep_file):
+            return
+        if self._timer and self._timer.is_alive():
+            self._timer.cancel()
+        self._timer = Timer(0.2, self._on_dep_file_changed)
+        self._timer.start()
+
+    def _on_dep_file_changed(self):
+        self.generate_compile_commands_count += 1
+        self.last_generate_compile_commands_time = time.time()
+        _generate_compiler_commands_from_dep_file(
+            self._project_root,
+            self._compiler_exe,
+            self._compiler_include_dir,
+            self._dep_file,
+            self._output_path,
+        )
 
 
 def _main():
@@ -161,45 +211,46 @@ def _main():
     if not dep_file.exists():
         raise FileNotFoundError(f".dep file {dep_file} not found.")
 
-    last_dep_file_modify_time = dep_file.stat().st_mtime
-    last_generate_compile_commands_time = time.time()
-    _run_once(
-        dep_file,
-        project_root,
-        compiler_exe,
-        compiler_include_dir,
-        compile_commands_out_path,
-    )
-
     if monitor_mode is True:
+
+        observer = Observer()
+        monitor = DepFileMonitor(
+            project_root,
+            compiler_exe,
+            compiler_include_dir,
+            dep_file,
+            compile_commands_out_path,
+        )
+        observer.schedule(monitor, path=str(dep_file.parent))
+        observer.start()
+
         try:
             while True:
-                latest_dep_file_modify_time = dep_file.stat().st_mtime
-                if latest_dep_file_modify_time != last_dep_file_modify_time:
-                    last_dep_file_modify_time = latest_dep_file_modify_time
-                    last_generate_compile_commands_time = time.time()
-                    _run_once(
-                        dep_file,
-                        project_root,
-                        compiler_exe,
-                        compiler_include_dir,
-                        compile_commands_out_path,
-                    )
-
                 width = shutil.get_terminal_size().columns
                 sys.stdout.write("\r" + " " * width + "\r")
                 now = time.time()
                 time.strftime("%H:%M:%S", time.localtime(now))
                 sys.stdout.write(
-                    f"Current time: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))} | Last generation was { str(timedelta(seconds = int(now - last_generate_compile_commands_time))) } seconds ago."
+                    f"Current time: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))} | "
+                    f"Last generation was { str(timedelta(seconds = int(now - monitor.last_generate_compile_commands_time))) } seconds ago | "
+                    f"Generate count: {monitor.generate_compile_commands_count}"
                 )
                 sys.stdout.flush()
 
                 time.sleep(1)
 
         except KeyboardInterrupt:
-            print("Stopped monitoring.")
-            sys.exit(0)
+            observer.stop()
+        observer.join()
+
+    else:
+        _generate_compiler_commands_from_dep_file(
+            project_root,
+            compiler_exe,
+            compiler_include_dir,
+            dep_file,
+            compile_commands_out_path,
+        )
 
 
 if __name__ == "__main__":
