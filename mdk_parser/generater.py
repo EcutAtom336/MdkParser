@@ -5,6 +5,9 @@ import json
 import shlex
 from pathlib import Path
 import time
+import shutil
+import sys
+from datetime import timedelta
 
 
 def get_raw_file_blocks(dep_file: Path) -> list[str]:
@@ -159,7 +162,7 @@ def main():
         raise FileNotFoundError(f".dep file {dep_file} not found.")
 
     last_dep_file_modify_time = dep_file.stat().st_mtime
-
+    last_generate_compile_commands_time = time.time()
     run_once(
         dep_file,
         project_root,
@@ -174,6 +177,7 @@ def main():
                 latest_dep_file_modify_time = dep_file.stat().st_mtime
                 if latest_dep_file_modify_time != last_dep_file_modify_time:
                     last_dep_file_modify_time = latest_dep_file_modify_time
+                    last_generate_compile_commands_time = time.time()
                     run_once(
                         dep_file,
                         project_root,
@@ -181,10 +185,21 @@ def main():
                         compiler_include_dir,
                         compile_commands_out_path,
                     )
-                    print("Regenerate compil_commands.json.")
+
+                width = shutil.get_terminal_size().columns
+                sys.stdout.write("\r" + " " * width + "\r")
+                now = time.time()
+                time.strftime("%H:%M:%S", time.localtime(now))
+                sys.stdout.write(
+                    f"Current time: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))} | Last generation was { str(timedelta(seconds = int(now - last_generate_compile_commands_time))) } seconds ago."
+                )
+                sys.stdout.flush()
+
                 time.sleep(1)
+
         except KeyboardInterrupt:
             print("Stopped monitoring.")
+            sys.exit(0)
 
 
 main()
